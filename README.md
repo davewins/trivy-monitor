@@ -42,3 +42,7 @@ See `.env.example`. Key ones: `SEVERITIES` (default `CRITICAL,HIGH`), `SCHEDULE_
 
 ## Also worth adding to your environment
 See `docs/HARDENING.md`.
+
+## License
+
+MIT, see [LICENSE](LICENSE). Third-party components keep their own licenses (see CLAUDE.md > Attributions).
