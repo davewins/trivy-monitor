@@ -23,7 +23,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks: [scanner-internal]
     read_only: true
-    tmpfs: [/run]
+    tmpfs: [/run, /tmp]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
 

@@ -85,8 +85,10 @@ def run_scan(cfg: Config) -> int:
         mailer.send(cfg, subj, text, html)
     else:
         log.info("clean scan of %d images; no email (SEND_CLEAN_REPORT=false)", len(results))
-    mailer.heartbeat(cfg)
-    log.info("scan complete: %d images, %s", len(results), "FINDINGS" if findings else "clean")
+    if not errors:  # a run with errors must not satisfy the heartbeat monitor
+        mailer.heartbeat(cfg)
+    status = "ERRORS" if errors else ("FINDINGS" if findings else "clean")
+    log.info("scan complete: %d images, %s", len(results), status)
     return 0
 
 
