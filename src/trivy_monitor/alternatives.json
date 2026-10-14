@@ -1,0 +1,10 @@
+{
+  "_comment": "image repo -> maintained alternatives (each is verified and scanned at run time). Extend via /data/alternatives.json.",
+  "atmoz/sftp": ["drakkan/sftpgo", "ghcr.io/linuxserver/openssh-server"],
+  "dperson/samba": ["ghcr.io/servercontainers/samba", "dockurr/samba"],
+  "containrrr/watchtower": ["nickfedor/watchtower"],
+  "bitnami/postgresql": ["postgres"],
+  "bitnami/redis": ["redis"],
+  "bitnami/mariadb": ["mariadb"],
+  "bitnami/mysql": ["mysql"]
+}

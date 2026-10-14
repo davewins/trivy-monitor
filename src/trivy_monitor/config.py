@@ -39,6 +39,16 @@ class Config:
     ignore_images: list[str] = field(default_factory=list)
     caution_patterns: list[str] = field(default_factory=list)
     trivy_timeout: str = "10m"
+    stale_days: int = 365
+    suggest_alternatives: bool = True
+    archive_method: str = "none"  # none | rsync | sftp
+    archive_host: str = ""
+    archive_port: int = 22
+    archive_user: str = ""
+    archive_path: str = ""
+    archive_ssh_key: str = ""
+    archive_known_hosts: str = ""
+    archive_keep_local: int = 8
     # email
     dry_run: bool = False
     send_clean_report: bool = False
@@ -80,6 +90,16 @@ class Config:
                 "CAUTION_PATTERNS",
                 "pihole,bunkerweb,wg-easy,guacamole,backrest,postgres,mysql,mariadb,redis")],
             trivy_timeout=env("TRIVY_TIMEOUT", "10m"),
+            stale_days=int(env("STALE_DAYS", "365")),
+            suggest_alternatives=env_bool("SUGGEST_ALTERNATIVES", True),
+            archive_method=env("ARCHIVE_METHOD", "none").lower(),
+            archive_host=env("ARCHIVE_HOST"),
+            archive_port=int(env("ARCHIVE_PORT", "22")),
+            archive_user=env("ARCHIVE_USER"),
+            archive_path=env("ARCHIVE_PATH"),
+            archive_ssh_key=env("ARCHIVE_SSH_KEY"),          # or ARCHIVE_SSH_KEY_FILE=/path
+            archive_known_hosts=env("ARCHIVE_KNOWN_HOSTS"),  # or ARCHIVE_KNOWN_HOSTS_FILE=/path
+            archive_keep_local=int(env("ARCHIVE_KEEP_LOCAL", "8")),
             dry_run=env_bool("DRY_RUN", False),
             send_clean_report=env_bool("SEND_CLEAN_REPORT", False),
             smtp_host=env("SMTP_HOST"),
@@ -96,6 +116,14 @@ class Config:
         )
 
     def validate(self) -> None:
+        if self.archive_method not in ("none", "rsync", "sftp"):
+            raise ValueError("ARCHIVE_METHOD must be none, rsync or sftp")
+        if self.archive_method != "none":
+            missing = [n for n, v in (("ARCHIVE_HOST", self.archive_host), ("ARCHIVE_USER", self.archive_user),
+                                      ("ARCHIVE_PATH", self.archive_path), ("ARCHIVE_SSH_KEY(_FILE)", self.archive_ssh_key),
+                                      ("ARCHIVE_KNOWN_HOSTS(_FILE)", self.archive_known_hosts)) if not v]
+            if missing:
+                raise ValueError(f"ARCHIVE_METHOD={self.archive_method} needs: {', '.join(missing)}")
         if self.dry_run:
             return
         missing = [n for n, v in (("SMTP_HOST", self.smtp_host),

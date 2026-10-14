@@ -4,7 +4,7 @@ FROM ghcr.io/aquasecurity/trivy:${TRIVY_VERSION} AS trivy
 
 FROM python:3.13-slim-bookworm
 RUN apt-get update \
- && apt-get install -y --no-install-recommends skopeo ca-certificates \
+ && apt-get install -y --no-install-recommends skopeo ca-certificates openssh-client rsync \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=trivy /usr/local/bin/trivy /usr/local/bin/trivy
 

@@ -1,6 +1,8 @@
 """Discover running images, scan with Trivy, and check upstream for fixes."""
 import fnmatch
 import json
+from datetime import datetime, timezone
+from pathlib import Path
 import logging
 import os
 import re
@@ -23,10 +25,47 @@ class Vuln:
     severity: str
     title: str = ""
     url: str = ""
+    published: str = ""
+
+    @property
+    def age_days(self) -> int | None:
+        return days_since(self.published)
 
     @property
     def key(self) -> str:
         return f"{self.id}|{self.pkg}"
+
+
+def days_since(iso: str) -> int | None:
+    if not iso:
+        return None
+    try:
+        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return max(0, (datetime.now(timezone.utc) - dt).days)
+    except ValueError:
+        return None
+
+
+def human_age(days: int | None) -> str:
+    if days is None:
+        return "?"
+    if days < 60:
+        return f"{days}d"
+    if days < 730:
+        return f"{days // 30}mo"
+    return f"{days / 365:.1f}y"
+
+
+@dataclass
+class Alt:
+    ref: str
+    last_published_days: int | None = None
+    cves: int | None = None
+    critical: int = 0
+    high: int = 0
+    error: str = ""
 
 
 @dataclass
@@ -52,6 +91,20 @@ class ImageResult:
     upstream: list[Upstream] = field(default_factory=list)
     new_keys: set = field(default_factory=set)
     caution: bool = False
+    stacks: list[str] = field(default_factory=list)
+    last_published_days: int | None = None   # registry build date of the tag we run
+    stale: bool = False
+    alternatives: list[Alt] = field(default_factory=list)
+
+    @property
+    def oldest_cve_days(self) -> int | None:
+        ages = [v.age_days for v in self.vulns if v.age_days is not None]
+        return max(ages) if ages else None
+
+    @property
+    def old_cves(self) -> int:
+        """Unique CVEs published more than a year ago."""
+        return len({v.id for v in self.vulns if (v.age_days or 0) > 365})
 
     def by_cve(self) -> list[tuple[Vuln, list[str]]]:
         """One row per CVE id (worst/first Vuln, all affected packages), already sorted."""
@@ -86,12 +139,14 @@ def discover(cfg: Config) -> dict[tuple[str, str], ImageResult]:
                 if any(fnmatch.fnmatch(ref, p) for p in cfg.ignore_images):
                     continue
                 iid = c.attrs["Image"]
-                label = c.labels.get("com.docker.compose.project", "")
+                label = c.labels.get("com.docker.compose.project") or c.labels.get("com.docker.stack.namespace") or ""
                 name = f"{label}/{c.name}" if label else c.name
                 key = (host, iid)
                 if key not in found:
                     found[key] = ImageResult(iid, ref, host, [])
                 found[key].containers.append(name)
+                if (label or "(standalone)") not in found[key].stacks:
+                    found[key].stacks.append(label or "(standalone)")
         except Exception as e:  # one unreachable host must not hide the others
             log.error("host %s unreachable: %s", host, e)
             found[(host, "unreachable")] = ImageResult(
@@ -156,7 +211,7 @@ def parse_trivy(raw: str) -> tuple[list[Vuln], str, bool]:
         for v in res.get("Vulnerabilities") or []:
             vv = Vuln(v["VulnerabilityID"], v.get("PkgName", ""), v.get("InstalledVersion", ""),
                       v.get("FixedVersion", ""), v.get("Severity", "UNKNOWN"),
-                      v.get("Title", ""), v.get("PrimaryURL", ""))
+                      v.get("Title", ""), v.get("PrimaryURL", ""), v.get("PublishedDate", ""))
             if vv.key not in seen:
                 seen.add(vv.key)
                 vulns.append(vv)
@@ -209,9 +264,10 @@ def pick_newer_tags(current: str, tags: list[str]) -> dict[str, str]:
     return out
 
 
-def remote_digest(ref: str) -> str:
-    out = _run(["skopeo", "inspect", "--no-tags", f"docker://{ref}"], timeout=120)
-    return json.loads(out)["Digest"]
+def remote_info(ref: str) -> tuple[str, str]:
+    """(digest, created ISO date) of an image in its registry."""
+    out = json.loads(_run(["skopeo", "inspect", "--no-tags", f"docker://{ref}"], timeout=120))
+    return out["Digest"], out.get("Created") or ""
 
 
 def list_tags(repo: str) -> list[str]:
@@ -242,21 +298,24 @@ def check_upstream(cfg: Config, r: ImageResult, host_url: str) -> None:
             u.error = str(e)
         r.upstream.append(u)
 
-    # 1) has the same tag been rebuilt upstream since we pulled it?
+    # 1) has the same tag been rebuilt upstream since we pulled it? (also tells us when it was last published)
+    registry_ok = False
     try:
         local = local_repo_digests(host_url, r.image_id)
         if not local:
             r.upstream.append(Upstream("locally built image", r.ref, "rebuild",
                                        error="no registry digest; rebuild locally with a refreshed base image"))
             return
-        else:
-            digest = remote_digest(f"{repo}:{tag}")
-            if not any(digest in d for d in local):
-                evaluate(f"{repo}:{tag} (newer build of same tag)", f"{repo}:{tag}", "rebuild")
+        digest, created = remote_info(f"{repo}:{tag}")
+        registry_ok = True
+        r.last_published_days = days_since(created)
+        if not any(digest in d for d in local):
+            evaluate(f"{repo}:{tag} (newer build of same tag)", f"{repo}:{tag}", "rebuild")
     except Exception as e:
         r.upstream.append(Upstream("registry check", r.ref, "rebuild", error=str(e)))
 
     # 2) is there a newer version tag?
+    newer = {}
     try:
         newer = pick_newer_tags(tag, list_tags(repo))
         minor, major = newer.get("minor"), newer.get("major")
@@ -266,6 +325,53 @@ def check_upstream(cfg: Config, r: ImageResult, host_url: str) -> None:
             evaluate(f"{repo}:{major} (next major)", f"{repo}:{major}", "major")
     except Exception as e:
         log.info("tag listing failed for %s: %s", repo, e)
+
+    # 3) is the project itself still publishing? (nothing newer, and the tag has not been rebuilt in ages)
+    rebuilt = any(u.kind == "rebuild" and not u.error for u in r.upstream)
+    if registry_ok and not newer and not rebuilt and (r.last_published_days or 0) > cfg.stale_days:
+        r.stale = True
+    if cfg.suggest_alternatives and (r.stale or r.eosl):
+        suggest_alternatives(cfg, r)
+
+
+# ---------- alternatives ----------
+
+def norm_repo(repo: str) -> str:
+    repo = repo.lower()
+    for pre in ("docker.io/", "index.docker.io/", "registry-1.docker.io/"):
+        if repo.startswith(pre):
+            repo = repo[len(pre):]
+    return repo[len("library/"):] if repo.startswith("library/") else repo
+
+
+def load_alternatives(cfg: Config) -> dict[str, list[str]]:
+    table: dict[str, list[str]] = {}
+    for path in (Path(__file__).with_name("alternatives.json"), Path(cfg.state_dir) / "alternatives.json"):
+        try:
+            table.update({norm_repo(k): v for k, v in json.loads(path.read_text()).items() if not k.startswith("_")})
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            log.warning("could not read %s: %s", path, e)
+    return table
+
+
+def suggest_alternatives(cfg: Config, r: ImageResult) -> None:
+    repo, _ = split_ref(r.ref)
+    for alt_ref in load_alternatives(cfg).get(norm_repo(repo), [])[:3]:
+        base, tag = split_ref(alt_ref)
+        ref = f"{base}:{tag or 'latest'}"
+        a = Alt(ref)
+        try:
+            _, created = remote_info(ref)
+            a.last_published_days = days_since(created)
+            vulns, _, _ = trivy_scan(cfg, ref, "remote")
+            a.cves = len({v.id for v in vulns})
+            a.critical = len({v.id for v in vulns if v.severity == "CRITICAL"})
+            a.high = len({v.id for v in vulns if v.severity == "HIGH"})
+        except Exception as e:
+            a.error = str(e)[-200:]
+        r.alternatives.append(a)
 
 
 def recommend(r: ImageResult) -> str:
@@ -288,6 +394,14 @@ def recommend(r: ImageResult) -> str:
     else:
         notes.append("No fixed versions published for these findings yet. Consider limiting exposure "
                      "(network, auth) until upstream ships a fix.")
+    if r.stale:
+        notes.append(f"Upstream looks unmaintained: this tag was last published {human_age(r.last_published_days)} ago "
+                     "and no newer version exists, so fixes are unlikely.")
+    good_alts = sorted((a for a in r.alternatives if not a.error), key=lambda a: a.cves if a.cves is not None else 1e9)
+    if good_alts:
+        a = good_alts[0]
+        notes.append(f"Consider migrating to {a.ref} (published {human_age(a.last_published_days)} ago, "
+                     f"{a.critical} critical / {a.high} high). It is a different image: review its config and volumes first.")
     if r.eosl:
         notes.append(f"Base OS {r.os_name} is end-of-life: move to a supported image variant.")
     if r.caution:

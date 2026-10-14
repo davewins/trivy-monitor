@@ -53,9 +53,22 @@ services:
       MAIL_FROM: ${MAIL_FROM:-}
       MAIL_TO: ${MAIL_TO}
       HEARTBEAT_URL: ${HEARTBEAT_URL:-}
+      STALE_DAYS: ${STALE_DAYS:-365}
+      SUGGEST_ALTERNATIVES: ${SUGGEST_ALTERNATIVES:-true}
+      # Optional report archive to a NAS (rsync over ssh, or sftp) into <ARCHIVE_PATH>/<YYYY-MM-DD_HHMMSS>/
+      ARCHIVE_METHOD: ${ARCHIVE_METHOD:-none}
+      ARCHIVE_HOST: ${ARCHIVE_HOST:-}
+      ARCHIVE_PORT: ${ARCHIVE_PORT:-22}
+      ARCHIVE_USER: ${ARCHIVE_USER:-}
+      ARCHIVE_PATH: ${ARCHIVE_PATH:-}
+      ARCHIVE_KNOWN_HOSTS: ${ARCHIVE_KNOWN_HOSTS:-}
+      ARCHIVE_KEEP_LOCAL: ${ARCHIVE_KEEP_LOCAL:-8}
+      ARCHIVE_SSH_KEY_FILE: /run/archive_key
     volumes:
       - trivy-cache:/cache
       - monitor-data:/data
+      # Private key for the NAS, kept on the host and never in git (see README). /dev/null = no key.
+      - ${ARCHIVE_SSH_KEY_HOST_PATH:-/dev/null}:/run/archive_key:ro
     networks: [scanner-internal, default]   # default = internet for DB/registry/SMTP
     read_only: true
     tmpfs: [/tmp]

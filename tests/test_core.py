@@ -61,3 +61,59 @@ def test_recommend_no_fix():
     r = ImageResult("x", "a:1", "local", ["a"])
     r.vulns = [parse_trivy(TRIVY_JSON)[0][1]]
     assert "No fixed versions" in recommend(r)
+
+
+# ---- age, stacks, alternatives, archive ----
+from datetime import datetime, timedelta, timezone
+
+from trivy_monitor import archive
+from trivy_monitor.scanner import Alt, days_since, human_age, load_alternatives, norm_repo
+
+
+def test_age_helpers():
+    old = (datetime.now(timezone.utc) - timedelta(days=800)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    assert 799 <= days_since(old) <= 801
+    assert days_since("") is None and days_since("garbage") is None
+    assert human_age(10) == "10d" and human_age(200) == "6mo" and human_age(800) == "2.2y" and human_age(None) == "?"
+
+
+def test_alternatives_lookup(tmp_path):
+    cfg = Config(state_dir=str(tmp_path))
+    (tmp_path / "alternatives.json").write_text('{"Foo/Bar": ["baz/qux"]}')
+    table = load_alternatives(cfg)
+    assert table["atmoz/sftp"][0] == "drakkan/sftpgo"          # bundled
+    assert table["foo/bar"] == ["baz/qux"]                      # user-supplied, normalised
+    assert norm_repo("docker.io/library/Redis") == "redis"
+
+
+def test_report_shows_stack_age_alternative():
+    cfg = Config(dry_run=True)
+    r = ImageResult("sha256:x", "atmoz/sftp:latest", "local", ["files/sftp"], stacks=["files"])
+    v, _, _ = parse_trivy(TRIVY_JSON.replace('"Severity": "HIGH"', '"Severity": "HIGH", "PublishedDate": "2020-01-01T00:00:00Z"'))
+    r.vulns = v
+    r.stale, r.last_published_days = True, 800
+    r.alternatives = [Alt("drakkan/sftpgo:latest", 20, 3, 0, 3)]
+    text, html = report.render(cfg, [r])
+    assert "BY STACK" in text and "files" in text
+    assert "oldest CVE" in text and "alternative drakkan/sftpgo" in text
+    assert "unmaintained" in recommend(r) and "drakkan/sftpgo" in recommend(r)
+
+
+def test_archive_local_and_retention(tmp_path):
+    cfg = Config(state_dir=str(tmp_path), archive_keep_local=2)
+    for i in range(4):
+        d = archive.save_local(cfg, f"2026-01-0{i + 1}_000000", "t", "<p>h</p>", [])
+    names = sorted(p.name for p in (tmp_path / "reports").iterdir())
+    assert names == ["2026-01-03_000000", "2026-01-04_000000"]
+    assert (d / "report.txt").read_text() == "t" and (d / "results.json").exists()
+    assert archive.remote_dir(Config(archive_path="/a/b/"), "X") == "/a/b/X"
+    assert len(archive.stamp(datetime(2026, 10, 19, 6, 0, 12))) == 17
+
+
+def test_archive_config_validation():
+    import pytest
+    with pytest.raises(ValueError):
+        Config(archive_method="rsync").validate()
+    with pytest.raises(ValueError):
+        Config(archive_method="ftp").validate()
+    Config(archive_method="none", dry_run=True).validate()

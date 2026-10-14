@@ -14,6 +14,24 @@ tells you whether upstream already ships a fix and what to update.
 - **Scan errors are emailed too**: an unreachable host, failed DB update or failed image scan is never reported as "clean".
   Zero containers discovered is treated as an error. Optional `HEARTBEAT_URL` (e.g. Uptime Kuma push) catches the case where the container itself dies.
 
+## Extra detail in each report
+- **Stack**: which Portainer/compose stack (and containers) use each image, plus a per-stack roll-up.
+- **CVE age**: how long ago each CVE was published, the oldest per image, and how many are over a year old.
+- **Unmaintained upstream**: no newer tag and the tag last published more than `STALE_DAYS` ago.
+- **Alternatives**: for stale or end-of-life images, maintained replacements from `alternatives.json` are checked
+  (exists, last published, CVE count at your severities). Add your own in `/data/alternatives.json` (same format).
+- **Archive**: every run is saved as `reports/<YYYY-MM-DD_HHMMSS>/{report.txt,report.html,results.json}` (all CVEs, not the
+  email's capped list) in the `monitor-data` volume, and optionally copied to a NAS.
+
+### Archiving to a NAS
+1. On the NAS create a user + directory; generate a dedicated key: `ssh-keygen -t ed25519 -f ~/trivy_archive -N ''`, add the
+   `.pub` to that user's `authorized_keys` (restrict it to the reports directory/sftp if your NAS supports it).
+2. `chown 10001 ~/trivy_archive && chmod 400 ~/trivy_archive` on the Docker host; set `ARCHIVE_SSH_KEY_HOST_PATH` to its path.
+3. `ssh-keyscan -t ed25519 <nas>` and check the fingerprint against the NAS before pasting into `ARCHIVE_KNOWN_HOSTS`.
+   Host keys are always verified (no trust-on-first-use).
+4. Set `ARCHIVE_METHOD=rsync` (or `sftp` if the NAS only offers SFTP), `ARCHIVE_HOST`, `ARCHIVE_USER`, `ARCHIVE_PATH`.
+A failed upload is treated as an error: it is called out in the email and the heartbeat is withheld.
+
 ## Deploy in Portainer
 1. Push this repo to GitHub (public). The Actions workflow tests it and publishes `ghcr.io/<you>/trivy-monitor:latest`
    (make the package public, or add GHCR registry creds in Portainer).

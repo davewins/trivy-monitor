@@ -9,7 +9,7 @@ from pathlib import Path
 
 from croniter import croniter
 
-from . import mailer, report, scanner
+from . import archive, mailer, report, scanner
 from .config import Config
 
 log = logging.getLogger("trivy-monitor")
@@ -79,9 +79,24 @@ def run_scan(cfg: Config) -> int:
     if not results:
         errors = True
         log.error("no containers discovered - refusing to report all-clear")
+
+    notes: list[str] = []
+    name = archive.stamp()
+    try:  # always keep a full local record; copy to the NAS if configured
+        full_text, full_html = report.render(cfg, results, max_rows=None)
+        local_dir = archive.save_local(cfg, name, full_text, full_html, results)
+        dest = archive.upload(cfg, local_dir, name)
+        notes.append(f"Full report archived to {dest}" if dest else f"Full report saved in container volume: {local_dir}")
+    except Exception as e:
+        errors = True
+        log.error("archive failed: %s", e)
+        notes.append(f"ARCHIVE FAILED (report not stored on the NAS): {e}")
+
     if findings or errors or cfg.send_clean_report:
-        text, html = report.render(cfg, results)
+        text, html = report.render(cfg, results, notes=notes)
         subj = report.subject(cfg, results) if results else "no containers found - check DOCKER_HOSTS"
+        if any(n.startswith("ARCHIVE FAILED") for n in notes):
+            subj += ", ARCHIVE FAILED"
         mailer.send(cfg, subj, text, html)
     else:
         log.info("clean scan of %d images; no email (SEND_CLEAN_REPORT=false)", len(results))
