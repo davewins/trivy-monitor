@@ -194,3 +194,26 @@ def test_registry_tags_pagination_and_cap(monkeypatch):
     _fake_registry(monkeypatch, pages=registry.MAX_TAG_PAGES + 5)
     with pytest.raises(registry.RegistryError):
         registry.tags("ghcr.io/a/b")                       # refuse to act on a truncated list
+
+
+def test_clock_uses_tzdata_not_os(monkeypatch):
+    import importlib
+
+    from trivy_monitor import clock
+    monkeypatch.setenv("TZ", "Europe/London")
+    c = importlib.reload(clock)
+    assert c.TZ_WARNING == "" and c.now().tzinfo is not None
+    monkeypatch.setenv("TZ", "Not/AZone")
+    assert "falling back to UTC" in importlib.reload(clock).TZ_WARNING
+    monkeypatch.delenv("TZ")
+    importlib.reload(clock)
+
+
+def test_log_timezone_hook_formats_records():
+    import logging
+
+    from trivy_monitor import clock
+    clock.install_log_timezone()
+    rec = logging.LogRecord("t", logging.INFO, __file__, 1, "hello", (), None)
+    out = logging.Formatter("%(asctime)s %(message)s").format(rec)   # raised TypeError before the staticmethod fix
+    assert out.endswith("hello")

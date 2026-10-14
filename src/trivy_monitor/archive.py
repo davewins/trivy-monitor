@@ -7,6 +7,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
+from . import clock
 from .config import Config
 
 log = logging.getLogger("trivy-monitor")
@@ -22,7 +23,7 @@ def _default(o):
 
 
 def stamp(now: datetime | None = None) -> str:
-    return (now or datetime.now()).strftime("%Y-%m-%d_%H%M%S")
+    return (now or clock.now()).strftime("%Y-%m-%d_%H%M%S")
 
 
 def save_local(cfg: Config, name: str, text: str, html: str, results: list) -> Path:

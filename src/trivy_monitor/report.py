@@ -1,6 +1,7 @@
 import html
 from datetime import datetime
 
+from . import clock
 from .config import Config
 from .scanner import ImageResult, human_age, recommend
 
@@ -38,7 +39,7 @@ def render(cfg: Config, results: list[ImageResult], max_rows: int | None = -1,
     bad = [r for r in results if r.vulns]
     errs = [r for r in results if r.error]
     t, h = [], []
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    now = clock.now().strftime("%Y-%m-%d %H:%M %Z")
     t.append(f"Trivy scan {now}: {len(results)} images, severities {','.join(cfg.severities)}"
              f"{', fixable only' if cfg.only_fixable else ''}")
     h.append(f"<h2>Trivy CVE report</h2><p>{now} &middot; {len(results)} images &middot; "

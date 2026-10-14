@@ -9,7 +9,7 @@ from pathlib import Path
 
 from croniter import croniter
 
-from . import archive, mailer, report, scanner
+from . import archive, clock, mailer, report, scanner
 from .config import Config
 
 log = logging.getLogger("trivy-monitor")
@@ -110,6 +110,7 @@ def run_scan(cfg: Config) -> int:
 def main() -> int:
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
                         format="%(asctime)s %(levelname)s %(message)s")
+    clock.install_log_timezone()
     ap = argparse.ArgumentParser()
     ap.add_argument("--once", action="store_true", help="scan once and exit")
     args = ap.parse_args()
@@ -129,9 +130,9 @@ def main() -> int:
     if cfg.run_on_start:
         _safe_run(cfg)
     while True:
-        nxt = croniter(cfg.schedule, datetime.now().astimezone()).get_next(datetime)
+        nxt = croniter(cfg.schedule, clock.now()).get_next(datetime)
         log.info("next scan at %s", nxt.isoformat(timespec="minutes"))
-        while datetime.now().astimezone() < nxt:
+        while clock.now() < nxt:
             touch_health()
             time.sleep(30)
         _safe_run(cfg)
