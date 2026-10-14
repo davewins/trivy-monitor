@@ -1,0 +1,72 @@
+# Portainer stack: Stacks > Add stack > Repository (or Web editor), then set the
+# variables from .env.example in "Environment variables". No secrets live in this file.
+services:
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy:v0.5.0
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1   # list containers
+      IMAGES: 1       # inspect/export images for scanning
+      VERSION: 1
+      POST: 0         # read-only: no create/start/stop/exec
+      INFO: 0
+      NETWORKS: 0
+      VOLUMES: 0
+      SERVICES: 0
+      TASKS: 0
+      SECRETS: 0
+      CONFIGS: 0
+      EXEC: 0
+      BUILD: 0
+      AUTH: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [scanner-internal]
+    read_only: true
+    tmpfs: [/run]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  trivy-monitor:
+    image: ${TRIVY_MONITOR_IMAGE:-ghcr.io/YOUR_GH_USER/trivy-monitor:latest}
+    restart: unless-stopped
+    depends_on: [socket-proxy]
+    environment:
+      TZ: ${TZ:-Europe/London}
+      DOCKER_HOSTS: ${DOCKER_HOSTS:-local=tcp://socket-proxy:2375}
+      INSTANCE_NAME: ${INSTANCE_NAME:-}
+      SCHEDULE_CRON: ${SCHEDULE_CRON:-0 6 * * 1}
+      RUN_ON_START: ${RUN_ON_START:-false}
+      SEVERITIES: ${SEVERITIES:-CRITICAL,HIGH}
+      ONLY_FIXABLE: ${ONLY_FIXABLE:-false}
+      CHECK_UPSTREAM: ${CHECK_UPSTREAM:-true}
+      INCLUDE_STOPPED: ${INCLUDE_STOPPED:-false}
+      IGNORE_IMAGES: ${IGNORE_IMAGES:-}
+      CAUTION_PATTERNS: ${CAUTION_PATTERNS:-pihole,bunkerweb,wg-easy,guacamole,backrest,postgres,mysql,mariadb,redis}
+      SEND_CLEAN_REPORT: ${SEND_CLEAN_REPORT:-false}
+      DRY_RUN: ${DRY_RUN:-false}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURITY: ${SMTP_SECURITY:-starttls}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      MAIL_TO: ${MAIL_TO}
+      HEARTBEAT_URL: ${HEARTBEAT_URL:-}
+    volumes:
+      - trivy-cache:/cache
+      - monitor-data:/data
+    networks: [scanner-internal, default]   # default = internet for DB/registry/SMTP
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 2g
+
+networks:
+  scanner-internal:
+    internal: true
+
+volumes:
+  trivy-cache:
+  monitor-data:
