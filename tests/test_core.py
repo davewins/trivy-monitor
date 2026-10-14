@@ -117,3 +117,17 @@ def test_archive_config_validation():
     with pytest.raises(ValueError):
         Config(archive_method="ftp").validate()
     Config(archive_method="none", dry_run=True).validate()
+
+
+def test_archive_local_method(tmp_path, monkeypatch):
+    import pytest
+    cfg = Config(state_dir=str(tmp_path / "state"), archive_method="local")
+    Config(archive_method="local", dry_run=True).validate()      # needs no host/key settings
+    d = archive.save_local(cfg, "2026-01-01_000000", "t", "h", [])
+    dest = tmp_path / "nas"
+    monkeypatch.setattr(archive, "LOCAL_ARCHIVE_DIR", str(dest))
+    with pytest.raises(RuntimeError):                            # missing mount must fail loudly
+        archive.upload(cfg, d, d.name)
+    dest.mkdir()
+    assert "2026-01-01_000000" in archive.upload(cfg, d, d.name)
+    assert (dest / "2026-01-01_000000" / "report.txt").read_text() == "t"

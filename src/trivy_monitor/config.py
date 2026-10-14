@@ -116,9 +116,9 @@ class Config:
         )
 
     def validate(self) -> None:
-        if self.archive_method not in ("none", "rsync", "sftp"):
-            raise ValueError("ARCHIVE_METHOD must be none, rsync or sftp")
-        if self.archive_method != "none":
+        if self.archive_method not in ("none", "local", "rsync", "sftp"):
+            raise ValueError("ARCHIVE_METHOD must be none, local, rsync or sftp")
+        if self.archive_method in ("rsync", "sftp"):
             missing = [n for n, v in (("ARCHIVE_HOST", self.archive_host), ("ARCHIVE_USER", self.archive_user),
                                       ("ARCHIVE_PATH", self.archive_path), ("ARCHIVE_SSH_KEY(_FILE)", self.archive_ssh_key),
                                       ("ARCHIVE_KNOWN_HOSTS(_FILE)", self.archive_known_hosts)) if not v]

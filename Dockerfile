@@ -14,12 +14,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ /app/
 
 RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin scanner \
- && mkdir -p /cache /data && chown scanner /cache /data
+ && mkdir -p /cache /data /archive && chown scanner /cache /data /archive
 USER scanner
 
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
     TRIVY_CACHE_DIR=/cache STATE_DIR=/data HOME=/tmp
-VOLUME ["/cache", "/data"]
+VOLUME ["/cache", "/data", "/archive"]
 
 HEALTHCHECK --interval=60s --timeout=5s --start-period=30s --retries=3 \
   CMD python -c "import os,sys,time; sys.exit(0 if time.time()-os.path.getmtime('/tmp/healthy')<300 else 1)"

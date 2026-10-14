@@ -69,6 +69,9 @@ services:
       - monitor-data:/data
       # Private key for the NAS, kept on the host and never in git (see README). /dev/null = no key.
       - ${ARCHIVE_SSH_KEY_HOST_PATH:-/dev/null}:/run/archive_key:ro
+      # ARCHIVE_METHOD=local: host folder (absolute path) that receives the dated report directories.
+      # Unset = an internal named volume, so nothing is written outside Docker.
+      - ${ARCHIVE_LOCAL_DIR:-archive-data}:/archive
     networks: [scanner-internal, default]   # default = internet for DB/registry/SMTP
     read_only: true
     tmpfs: [/tmp]
@@ -83,3 +86,4 @@ networks:
 volumes:
   trivy-cache:
   monitor-data:
+  archive-data:

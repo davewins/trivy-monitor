@@ -12,6 +12,7 @@ from pathlib import Path
 from .config import Config
 
 log = logging.getLogger("trivy-monitor")
+LOCAL_ARCHIVE_DIR = "/archive"
 
 
 def _default(o):
@@ -60,6 +61,12 @@ def upload(cfg: Config, local_dir: Path, name: str) -> str:
     """Copy local_dir to the NAS. Returns a human-readable destination. Raises on any failure."""
     if cfg.archive_method == "none":
         return ""
+    if cfg.archive_method == "local":  # bind-mounted host folder (compose mounts it at /archive)
+        target = Path(LOCAL_ARCHIVE_DIR)
+        if not target.is_dir() or not os.access(target, os.W_OK):
+            raise RuntimeError(f"{target} is not a writable directory; check ARCHIVE_LOCAL_DIR and its ownership (uid 10001)")
+        shutil.copytree(local_dir, target / name)
+        return f"{target / name} (host folder mounted at {LOCAL_ARCHIVE_DIR})"
     dest = remote_dir(cfg, name)
     with tempfile.TemporaryDirectory(prefix="archive-") as tmp:
         key, kh = os.path.join(tmp, "key"), os.path.join(tmp, "known_hosts")

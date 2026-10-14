@@ -24,6 +24,9 @@ tells you whether upstream already ships a fix and what to update.
   email's capped list) in the `monitor-data` volume, and optionally copied to a NAS.
 
 ### Archiving to a NAS
+**NAS is the Docker host itself?** Use `ARCHIVE_METHOD=local` and `ARCHIVE_LOCAL_DIR=/path/on/host` (a folder writable by uid 10001,
+e.g. `sudo install -d -o 10001 /mnt/nas/trivy-reports`). No keys or SSH. Everything below is for a *remote* NAS.
+
 1. On the NAS create a user + directory; generate a dedicated key: `ssh-keygen -t ed25519 -f ~/trivy_archive -N ''`, add the
    `.pub` to that user's `authorized_keys` (restrict it to the reports directory/sftp if your NAS supports it).
 2. `chown 10001 ~/trivy_archive && chmod 400 ~/trivy_archive` on the Docker host; set `ARCHIVE_SSH_KEY_HOST_PATH` to its path.
