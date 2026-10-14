@@ -54,7 +54,7 @@ def run_scan(cfg: Config) -> int:
     for (host, iid), r in found.items():
         if not r.error:
             try:
-                r.vulns, r.os_name, r.eosl = scanner.trivy_scan(cfg, iid, "docker", urls[host])
+                r.vulns, r.os_name, r.eosl = scanner.scan_image(cfg, r, urls[host])
                 if cfg.check_upstream and r.vulns:
                     scanner.check_upstream(cfg, r, urls[host])
             except Exception as e:

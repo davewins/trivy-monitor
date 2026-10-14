@@ -130,6 +130,23 @@ def trivy_scan(cfg: Config, target: str, source: str, docker_url: str = "") -> t
     return parse_trivy(_run(cmd, env))
 
 
+def scan_image(cfg: Config, r: ImageResult, host_url: str) -> tuple[list[Vuln], str, bool]:
+    """Scan via the Docker daemon; if its image export is broken (seen with images carrying
+    attestation manifests), fall back to scanning the exact digest from the registry."""
+    try:
+        return trivy_scan(cfg, r.image_id, "docker", host_url)
+    except Exception as first:
+        digests = []
+        try:
+            digests = local_repo_digests(host_url, r.image_id)
+        except Exception:
+            pass
+        if not digests:
+            raise
+        log.warning("%s: daemon export failed (%s); retrying from registry", r.ref, str(first)[-120:])
+        return trivy_scan(cfg, digests[0], "remote")
+
+
 def parse_trivy(raw: str) -> tuple[list[Vuln], str, bool]:
     data = json.loads(raw)
     meta_os = (data.get("Metadata") or {}).get("OS") or {}
