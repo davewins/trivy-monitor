@@ -2,7 +2,7 @@
 ARG TRIVY_VERSION=0.75.0
 FROM ghcr.io/aquasecurity/trivy:${TRIVY_VERSION} AS trivy
 
-FROM python:3.13-slim-bookworm
+FROM python:3.14-slim-bookworm
 RUN apt-get update \
  && apt-get install -y --no-install-recommends skopeo ca-certificates openssh-client rsync \
  && rm -rf /var/lib/apt/lists/*
