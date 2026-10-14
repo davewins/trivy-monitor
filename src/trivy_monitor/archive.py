@@ -4,8 +4,6 @@ import json
 import logging
 import os
 import shutil
-import subprocess
-import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -42,48 +40,12 @@ def save_local(cfg: Config, name: str, text: str, html: str, results: list) -> P
     return d
 
 
-def _run(cmd: list[str], stdin: str | None = None) -> None:
-    p = subprocess.run(cmd, input=stdin, capture_output=True, text=True, timeout=300)
-    if p.returncode != 0:
-        raise RuntimeError(f"{cmd[0]} failed ({p.returncode}): {(p.stderr or p.stdout).strip()[-300:]}")
-
-
-def ssh_options(cfg: Config, keyfile: str, known_hosts: str) -> list[str]:
-    return ["-i", keyfile, "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
-            "-o", f"UserKnownHostsFile={known_hosts}", "-o", "StrictHostKeyChecking=yes"]
-
-
-def remote_dir(cfg: Config, name: str) -> str:
-    return f"{cfg.archive_path.rstrip('/')}/{name}"
-
-
 def upload(cfg: Config, local_dir: Path, name: str) -> str:
-    """Copy local_dir to the NAS. Returns a human-readable destination. Raises on any failure."""
-    if cfg.archive_method == "none":
+    """Copy the run's directory to the host folder mounted at /archive. Raises on any failure."""
+    if cfg.archive_method != "local":
         return ""
-    if cfg.archive_method == "local":  # bind-mounted host folder (compose mounts it at /archive)
-        target = Path(LOCAL_ARCHIVE_DIR)
-        if not target.is_dir() or not os.access(target, os.W_OK):
-            raise RuntimeError(f"{target} is not a writable directory; check ARCHIVE_LOCAL_DIR and its ownership (uid 10001)")
-        shutil.copytree(local_dir, target / name)
-        return f"{target / name} (host folder mounted at {LOCAL_ARCHIVE_DIR})"
-    dest = remote_dir(cfg, name)
-    with tempfile.TemporaryDirectory(prefix="archive-") as tmp:
-        key, kh = os.path.join(tmp, "key"), os.path.join(tmp, "known_hosts")
-        Path(key).write_text(cfg.archive_ssh_key.rstrip("\n") + "\n")
-        os.chmod(key, 0o600)
-        Path(kh).write_text(cfg.archive_known_hosts.rstrip("\n") + "\n")
-        opts = ssh_options(cfg, key, kh)
-        target = f"{cfg.archive_user}@{cfg.archive_host}"
-        if cfg.archive_method == "rsync":
-            ssh = "ssh -p {} {}".format(cfg.archive_port, " ".join(opts))
-            _run(["rsync", "-rt", "--mkpath", "-e", ssh, f"{local_dir}/", f"{target}:{dest}/"])
-        else:  # sftp batch: create each path component (ignore 'exists'), then put the files
-            parts, cur, batch = [p for p in dest.split("/") if p], "", []
-            for part in parts:
-                cur += "/" + part
-                batch.append(f"-mkdir {cur}")
-            for f in sorted(local_dir.iterdir()):
-                batch.append(f"put {f} {dest}/{f.name}")
-            _run(["sftp", "-P", str(cfg.archive_port), *opts, "-b", "-", target], stdin="\n".join(batch) + "\n")
-    return f"{cfg.archive_user}@{cfg.archive_host}:{dest}"
+    target = Path(LOCAL_ARCHIVE_DIR)
+    if not target.is_dir() or not os.access(target, os.W_OK):
+        raise RuntimeError(f"{target} is not a writable directory; check ARCHIVE_LOCAL_DIR and its ownership (uid 10001)")
+    shutil.copytree(local_dir, target / name)
+    return f"{target / name} (host folder mounted at {LOCAL_ARCHIVE_DIR})"

@@ -106,16 +106,13 @@ def test_archive_local_and_retention(tmp_path):
     names = sorted(p.name for p in (tmp_path / "reports").iterdir())
     assert names == ["2026-01-03_000000", "2026-01-04_000000"]
     assert (d / "report.txt").read_text() == "t" and (d / "results.json").exists()
-    assert archive.remote_dir(Config(archive_path="/a/b/"), "X") == "/a/b/X"
     assert len(archive.stamp(datetime(2026, 10, 19, 6, 0, 12))) == 17
 
 
 def test_archive_config_validation():
     import pytest
     with pytest.raises(ValueError):
-        Config(archive_method="rsync").validate()
-    with pytest.raises(ValueError):
-        Config(archive_method="ftp").validate()
+        Config(archive_method="rsync").validate()      # ssh modes were removed
     Config(archive_method="none", dry_run=True).validate()
 
 
@@ -131,3 +128,69 @@ def test_archive_local_method(tmp_path, monkeypatch):
     dest.mkdir()
     assert "2026-01-01_000000" in archive.upload(cfg, d, d.name)
     assert (dest / "2026-01-01_000000" / "report.txt").read_text() == "t"
+
+
+# ---- registry client (no network: _fetch is faked) ----
+import hashlib
+
+from trivy_monitor import registry
+
+
+def test_parse_ref():
+    assert registry.parse_ref("nginx") == ("registry-1.docker.io", "library/nginx", "latest")
+    assert registry.parse_ref("louislam/uptime-kuma:2") == ("registry-1.docker.io", "louislam/uptime-kuma", "2")
+    assert registry.parse_ref("ghcr.io/a/b:1.2") == ("ghcr.io", "a/b", "1.2")
+    assert registry.parse_ref("host:5000/a/b") == ("host:5000", "a/b", "latest")
+    assert registry.parse_ref("docker.io/library/redis:7") == ("registry-1.docker.io", "library/redis", "7")
+    assert registry.parse_ref("a/b@sha256:abc")[2] == "sha256:abc"
+
+
+def _fake_registry(monkeypatch, pages=1):
+    import json as j
+    cfg = j.dumps({"created": "2024-07-14T12:14:40Z"}).encode()
+    cfg_d = "sha256:" + hashlib.sha256(cfg).hexdigest()
+    man = j.dumps({"mediaType": "application/vnd.oci.image.manifest.v1+json", "config": {"digest": cfg_d}}).encode()
+    man_d = "sha256:" + hashlib.sha256(man).hexdigest()
+    idx = j.dumps({"mediaType": registry.INDEX_TYPES[0], "manifests": [
+        {"digest": "sha256:attest", "platform": {"os": "unknown", "architecture": "unknown"}},
+        {"digest": man_d, "platform": {"os": "linux", "architecture": registry.ARCH.get(__import__("platform").machine().lower(), "amd64")}}]}).encode()
+    calls = []
+
+    def fake(url, headers):
+        calls.append((url, headers.get("Authorization")))
+        if "/token" in url:
+            return 200, {}, b'{"token": "T"}'
+        if url == "https://cdn.example/blob":
+            assert "Authorization" not in headers          # token must not leak to the CDN
+            return 200, {}, cfg
+        if headers.get("Authorization") is None and "/tags/" not in url:
+            return 401, {"WWW-Authenticate": 'Bearer realm="https://auth.example/token",service="reg"'}, b""
+        if url.endswith("/manifests/latest"):
+            return 200, {"Docker-Content-Digest": "sha256:topindex"}, idx
+        if url.endswith("/manifests/" + man_d):
+            return 200, {"Docker-Content-Digest": man_d}, man
+        if url.endswith("/blobs/" + cfg_d):
+            return 307, {"Location": "https://cdn.example/blob"}, b""
+        if "/tags/list" in url:
+            n = int(url.split("page=")[1]) if "page=" in url else 0
+            link = f'</v2/a/b/tags/list?n=1000&page={n + 1}>; rel="next"' if n + 1 < pages else ""
+            return 200, {"Link": link}, j.dumps({"tags": [f"1.{n}"]}).encode()
+        return 404, {}, b""
+    monkeypatch.setattr(registry, "_fetch", fake)
+    registry._tokens.clear()
+    return man_d
+
+
+def test_registry_info_index_token_and_cdn(monkeypatch):
+    man_d = _fake_registry(monkeypatch)
+    digests, created = registry.info("ghcr.io/a/b:latest")
+    assert digests == {"sha256:topindex", man_d} and created.startswith("2024-07-14")
+
+
+def test_registry_tags_pagination_and_cap(monkeypatch):
+    import pytest
+    _fake_registry(monkeypatch, pages=3)
+    assert registry.tags("ghcr.io/a/b") == ["1.0", "1.1", "1.2"]
+    _fake_registry(monkeypatch, pages=registry.MAX_TAG_PAGES + 5)
+    with pytest.raises(registry.RegistryError):
+        registry.tags("ghcr.io/a/b")                       # refuse to act on a truncated list

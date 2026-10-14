@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 
 import docker
 
+from . import registry
 from .config import SEVERITY_ORDER, Config
 
 log = logging.getLogger("trivy-monitor")
@@ -264,14 +265,13 @@ def pick_newer_tags(current: str, tags: list[str]) -> dict[str, str]:
     return out
 
 
-def remote_info(ref: str) -> tuple[str, str]:
-    """(digest, created ISO date) of an image in its registry."""
-    out = json.loads(_run(["skopeo", "inspect", "--no-tags", f"docker://{ref}"], timeout=120))
-    return out["Digest"], out.get("Created") or ""
+def remote_info(ref: str) -> tuple[set[str], str]:
+    """(digests identifying the image in its registry, created ISO date)."""
+    return registry.info(ref)
 
 
 def list_tags(repo: str) -> list[str]:
-    return json.loads(_run(["skopeo", "list-tags", f"docker://{repo}"], timeout=120)).get("Tags", [])
+    return registry.tags(repo)
 
 
 def local_repo_digests(host_url: str, image_id: str) -> list[str]:
@@ -306,13 +306,14 @@ def check_upstream(cfg: Config, r: ImageResult, host_url: str) -> None:
             r.upstream.append(Upstream("locally built image", r.ref, "rebuild",
                                        error="no registry digest; rebuild locally with a refreshed base image"))
             return
-        digest, created = remote_info(f"{repo}:{tag}")
+        digests, created = remote_info(f"{repo}:{tag}")
         registry_ok = True
         r.last_published_days = days_since(created)
-        if not any(digest in d for d in local):
+        if not any(d in loc for d in digests for loc in local):
             evaluate(f"{repo}:{tag} (newer build of same tag)", f"{repo}:{tag}", "rebuild")
     except Exception as e:
         r.upstream.append(Upstream("registry check", r.ref, "rebuild", error=str(e)))
+        return  # image not found / not readable anonymously: tag and staleness checks would be guesses
 
     # 2) is there a newer version tag?
     newer = {}

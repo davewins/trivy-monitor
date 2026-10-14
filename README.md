@@ -23,17 +23,11 @@ tells you whether upstream already ships a fix and what to update.
 - **Archive**: every run is saved as `reports/<YYYY-MM-DD_HHMMSS>/{report.txt,report.html,results.json}` (all CVEs, not the
   email's capped list) in the `monitor-data` volume, and optionally copied to a NAS.
 
-### Archiving to a NAS
-**NAS is the Docker host itself?** Use `ARCHIVE_METHOD=local` and `ARCHIVE_LOCAL_DIR=/path/on/host` (a folder writable by uid 10001,
-e.g. `sudo install -d -o 10001 /mnt/nas/trivy-reports`). No keys or SSH. Everything below is for a *remote* NAS.
-
-1. On the NAS create a user + directory; generate a dedicated key: `ssh-keygen -t ed25519 -f ~/trivy_archive -N ''`, add the
-   `.pub` to that user's `authorized_keys` (restrict it to the reports directory/sftp if your NAS supports it).
-2. `chown 10001 ~/trivy_archive && chmod 400 ~/trivy_archive` on the Docker host; set `ARCHIVE_SSH_KEY_HOST_PATH` to its path.
-3. `ssh-keyscan -t ed25519 <nas>` and check the fingerprint against the NAS before pasting into `ARCHIVE_KNOWN_HOSTS`.
-   Host keys are always verified (no trust-on-first-use).
-4. Set `ARCHIVE_METHOD=rsync` (or `sftp` if the NAS only offers SFTP), `ARCHIVE_HOST`, `ARCHIVE_USER`, `ARCHIVE_PATH`.
-A failed upload is treated as an error: it is called out in the email and the heartbeat is withheld.
+### Archiving reports to a folder / NAS
+Set `ARCHIVE_METHOD=local` and `ARCHIVE_LOCAL_DIR=/path/on/host` (e.g. a share on the Docker host). Give the container's user
+(uid 10001) write access without changing ownership: `sudo setfacl -m u:10001:rwx /path/on/host`.
+A failed copy is treated as an error: it is called out in the email and the heartbeat is withheld.
+(Remote rsync/sftp upload was removed to keep the image free of ssh/rsync; mount the NAS on the host instead.)
 
 ## Deploy in Portainer
 1. Push this repo to GitHub (public). The Actions workflow tests it and publishes `ghcr.io/<you>/trivy-monitor:latest`
@@ -57,6 +51,7 @@ See `.env.example`. Key ones: `SEVERITIES` (default `CRITICAL,HIGH`), `SCHEDULE_
 
 ## Security design
 - Docker access only via a read-only **socket proxy** (no start/stop/exec/create); the scanner has no socket mount.
+- Distroless runtime image (Chainguard Python): no shell, no package manager, no ssh/rsync/skopeo; registry checks use a small built-in client.
 - Scanner runs as non-root, read-only rootfs, all caps dropped, `no-new-privileges`, on an internal network to the proxy.
 - No credentials in the image or repo; Trivy and base image versions pinned; weekly CI rebuild; the CI scans its own image.
 - Scanning uses image *content* only; it never starts or modifies your containers.
