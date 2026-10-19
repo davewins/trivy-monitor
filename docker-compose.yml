@@ -61,12 +61,15 @@ services:
     volumes:
       - trivy-cache:/cache
       - monitor-data:/data
+      - scan-tmp:/tmp
       # ARCHIVE_METHOD=local: host folder (absolute path) that receives the dated report directories.
       # Unset = an internal named volume, so nothing is written outside Docker.
       - ${ARCHIVE_LOCAL_DIR:-archive-data}:/archive
     networks: [scanner-internal, default]   # default = internet for DB/registry/SMTP
     read_only: true
-    tmpfs: [/tmp]
+    # /tmp must NOT be a tmpfs: trivy exports each image there (frigate is ~9GB) and tmpfs is
+    # RAM charged to mem_limit, so the scan OOM-killed every image. A named volume keeps it on disk.
+    # (Docker seeds the new volume with the image's /tmp perms, so uid 10001 can write to it.)
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     mem_limit: 2g
@@ -78,4 +81,5 @@ networks:
 volumes:
   trivy-cache:
   monitor-data:
+  scan-tmp:
   archive-data:
