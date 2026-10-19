@@ -37,6 +37,7 @@ def save_state(cfg: Config, state: dict) -> None:
 def run_scan(cfg: Config) -> int:
     """Run one full scan. Returns process-style exit code (0 ok)."""
     log.info("scan starting")
+    scanner.purge_stale_tmp()
     state = load_state(cfg)
     prev = {k: set(v) for k, v in state.get("seen", {}).items()}
     try:

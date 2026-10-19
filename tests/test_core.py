@@ -217,3 +217,16 @@ def test_log_timezone_hook_formats_records():
     rec = logging.LogRecord("t", logging.INFO, __file__, 1, "hello", (), None)
     out = logging.Formatter("%(asctime)s %(message)s").format(rec)   # raised TypeError before the staticmethod fix
     assert out.endswith("hello")
+
+
+def test_purge_stale_tmp(tmp_path, monkeypatch):
+    from trivy_monitor import scanner
+    monkeypatch.setattr(scanner.tempfile, "gettempdir", lambda: str(tmp_path))
+    (tmp_path / "trivy-123").mkdir()
+    (tmp_path / "trivy-123" / "docker-export-1").write_text("x")
+    (tmp_path / "healthy").write_text("")
+    (tmp_path / "other").mkdir()
+    assert scanner.purge_stale_tmp() == 1
+    assert not (tmp_path / "trivy-123").exists()
+    assert (tmp_path / "healthy").exists() and (tmp_path / "other").exists()
+    assert scanner.purge_stale_tmp() == 0

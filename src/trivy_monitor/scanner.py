@@ -6,7 +6,9 @@ from pathlib import Path
 import logging
 import os
 import re
+import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 
 import docker
@@ -166,6 +168,19 @@ def _run(cmd: list[str], env: dict | None = None, timeout: int = 900) -> str:
     if p.returncode != 0:
         raise RuntimeError((p.stderr or p.stdout).strip()[-500:] or f"exit {p.returncode}")
     return p.stdout
+
+
+def purge_stale_tmp() -> int:
+    """Remove trivy-* scratch dirs a killed trivy left in the (disk-backed) temp dir.
+    Only call between scans: nothing else is running trivy then. Returns the count removed."""
+    n = 0
+    for d in Path(tempfile.gettempdir()).glob("trivy-*"):
+        if d.is_dir():
+            shutil.rmtree(d, ignore_errors=True)
+            n += 1
+    if n:
+        log.info("removed %d stale trivy temp dir(s) from a previous killed scan", n)
+    return n
 
 
 def update_db(cfg: Config) -> None:
