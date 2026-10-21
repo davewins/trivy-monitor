@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM ghcr.io/aquasecurity/trivy:0.76.0 AS trivy
+FROM ghcr.io/aquasecurity/trivy:0.76.1 AS trivy
 
 # Build stage has pip and a shell; the runtime stage below has neither (distroless).
 FROM cgr.dev/chainguard/python:latest-dev AS build
